@@ -15,7 +15,7 @@ where
     after: &'a [Token],
     interner: &'a Interner<T>,
 
-    pos: u32,
+    pos: Option<u32>,
     before_hunk_start: u32,
     after_hunk_start: u32,
     before_hunk_len: u32,
@@ -42,7 +42,7 @@ where
             interner: &input.interner,
             before: &input.before,
             after: &input.after,
-            pos: 0,
+            pos: None,
         }
     }
 }
@@ -65,7 +65,7 @@ where
             interner: &input.interner,
             before: &input.before,
             after: &input.after,
-            pos: 0,
+            pos: None,
         }
     }
 
@@ -79,9 +79,12 @@ where
         if self.before_hunk_len == 0 && self.after_hunk_len == 0 {
             return;
         }
+        let Some(pos) = self.pos.clone() else {
+            return;
+        };
 
-        let end = (self.pos + 3).min(self.before.len() as u32);
-        self.update_pos(end, end);
+        let end = (pos + 3).min(self.before.len() as u32);
+        self.update_pos(pos, end, end);
 
         writeln!(
             &mut self.dst,
@@ -98,10 +101,10 @@ where
         self.after_hunk_len = 0
     }
 
-    fn update_pos(&mut self, print_to: u32, move_to: u32) {
-        self.print_tokens(&self.before[self.pos as usize..print_to as usize], ' ');
-        let len = print_to - self.pos;
-        self.pos = move_to;
+    fn update_pos(&mut self, pos: u32, print_to: u32, move_to: u32) {
+        self.print_tokens(&self.before[pos as usize..print_to as usize], ' ');
+        let len = print_to - pos;
+        self.pos = Some(move_to);
         self.before_hunk_len += len;
         self.after_hunk_len += len;
     }
@@ -115,13 +118,13 @@ where
     type Out = W;
 
     fn process_change(&mut self, before: Range<u32>, after: Range<u32>) {
-        if before.start - self.pos > 6 {
+        if self.pos.is_none() || before.start.saturating_sub(self.pos.unwrap()) > 6 {
             self.flush();
-            self.pos = before.start - 3;
-            self.before_hunk_start = self.pos;
-            self.after_hunk_start = after.start - 3;
+            self.before_hunk_start = before.start.saturating_sub(3);
+            self.after_hunk_start = after.start.saturating_sub(3);
+            self.pos = Some(self.before_hunk_start);
         }
-        self.update_pos(before.start, before.end);
+        self.update_pos(self.pos.unwrap(), before.start, before.end);
         self.before_hunk_len += before.end - before.start;
         self.after_hunk_len += after.end - after.start;
         self.print_tokens(
